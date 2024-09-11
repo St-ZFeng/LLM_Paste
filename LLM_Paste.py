@@ -7,9 +7,23 @@ from openai import OpenAI
 import tkinter as tk
 from tkinter import ttk
 
+import pytgpt.auto as auto
+from pytgpt.imager import Prodia
+from PIL import Image
+import win32clipboard
+import win32clipboard as clip
+from io import BytesIO
+import asyncio
 
-def send_LLM(text,prompt):
-    
+def setImage(data):
+    clip.OpenClipboard() #打开剪贴板
+    clip.EmptyClipboard()  #先清空剪贴板
+    clip.SetClipboardData(win32clipboard.CF_DIB, data)  #将图片放入剪贴板
+    clip.CloseClipboard()
+
+def send_LLM(text,prompt,textg,loop):
+    asyncio.set_event_loop(loop)
+    openai_p=use_openai.get()
     openai.api_key = API_key
     openai.api_base = Url+"/v1"
     client = OpenAI(
@@ -18,22 +32,44 @@ def send_LLM(text,prompt):
     # This is the default and can be omitted
           
     )
+
     try:
-        chat_completion = client.chat.completions.create(
-            messages=[
-                {
-                    "role": "user",
-                    "content": prompt+". The text you need to process this time is as follows:\n"+text+"\nYou are now a competent and reliable machine, not a conscious agent. So you just complete the task operation, return clean result text, and don't add anything else.",
-                }
-            ],
-            model=model,timeout=60)
-        
-        print(chat_completion.choices[0].message.content)
-        pyperclip.copy(chat_completion.choices[0].message.content)
+        if textg:
+            if openai_p:
+                chat_completion = client.chat.completions.create(
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": prompt+". The text you need to process this time is as follows:\n"+text+"\nYou are now a competent and reliable machine, not a conscious agent. So you just complete the task operation, return clean result text, and don't add anything else.",
+                        }
+                    ],
+                    model=model,timeout=60)
+                
+                print(chat_completion.choices[0].message.content)
+                res=chat_completion.choices[0].message.content
+            else:
+                bot = auto.AUTO()
+                res=bot.chat(prompt+". The text you cannot identify image file <_io.BytesIO object at 0x000001758DD6E430> to process this time is as follows:\n"+text+"\nYou are now a competent and reliable machine, not a conscious agent. So you just complete the task operation, return clean result text, and don't add anything else.")
+            pyperclip.copy(res)
+        else:
+            img = Prodia()
+            generated_images = img.generate(prompt=prompt+"\n"+text, amount=1)
+            pic=generated_images[0]
+            
+            if b'500: Internal Server Error' == pic:
+                pyperclip.copy("Internet Server Error")
+                return None
+            image = Image.open(BytesIO(pic))
+            output=BytesIO()
+            image.save(output, "BMP") #以RGB模式保存图像
+            data = output.getvalue()[14:]
+            output.close()
+            setImage(data)
+                    
         
     except Exception as e:
-        print(e)
-        pyperclip.copy(e)
+        print(str(e))
+        pyperclip.copy(str(e))
     return None
     
     #return chat_completion.choices[0].message.content
@@ -73,6 +109,7 @@ def on_copy_event():
     task=selected_task.get()
     #根据任务名获取对应的prompt
     prompt=[n["prompt"] for n in tasks if n["task"]==task]
+    textg=[n["text_g"] for n in tasks if n["task"]==task]
     if len(prompt)>0:
     #global last_clipboard_content
     # 获取当前剪贴板内容
@@ -83,15 +120,15 @@ def on_copy_event():
         #if current_clipboard_content != last_clipboard_content:
         #last_clipboard_content = current_clipboard_content
         print(current_clipboard_content)
-        send_LLM_thread(current_clipboard_content,prompt[0])
+        send_LLM_thread(current_clipboard_content,prompt[0],textg[0])
         progress.stop()
     return None
     #return None
 
-def send_LLM_thread(text,prompt):
-   
+def send_LLM_thread(text,prompt,textg):
+    loop = asyncio.new_event_loop()
     import threading
-    t = threading.Thread(target=send_LLM, args=(text,prompt))
+    t = threading.Thread(target=send_LLM, args=(text,prompt,textg,loop,))
     t.start()
     t.join()
 
@@ -112,7 +149,8 @@ if __name__ == "__main__":
         tasks.append(
             {
                 "task": "Translate to English",
-                "prompt": "You are a English translate expert and your job is to translate text to English."
+                "prompt": "You are a English translate expert and your job is to translate text to English.",
+                "text_g":False
             }
         )
         #保存到json文件
@@ -145,6 +183,12 @@ if __name__ == "__main__":
 
     # 创建一个变量来存储选择结果
     selected_task = tk.StringVar(value="")
+    #创建一个复选框，存储是否采用openai
+    use_openai=tk.BooleanVar(value=True)
+    use_openai_cb = ttk.Checkbutton(frame, text="Use OpenAI", variable=use_openai)
+    use_openai_cb.grid(row=0, column=1, sticky=tk.W, padx=5, pady=5)
+
+    
 
     # 创建任务选择框的容器，并添加滚动条
     canvas = tk.Canvas(frame, width=300, height=60)
